@@ -1,18 +1,12 @@
-# Live Translate (English -> Indonesia)
+# Live Translate v2 (suara internal HP, English -> Indonesia)
 
-Overlay terjemahan langsung di atas aplikasi lain. Mendengar suara lewat mikrofon.
+Menangkap SUARA DARI HP ITU SENDIRI (tanpa mikrofon), mengenali bahasa Inggris
+secara offline (Vosk), lalu menampilkan terjemahan Indonesia di overlay.
 
-## Build APK (tanpa install apa pun): GitHub Actions
-1. Buat repo baru di github.com, unggah SELURUH isi folder ini (termasuk folder .github).
-2. Buka tab Actions -> "Build APK" -> tunggu hijau (3-6 menit).
-3. Buka run tersebut, unduh artifact "LiveTranslate-apk" (zip berisi app-debug.apk).
-4. Pasang APK di ponsel (izinkan "install dari sumber tidak dikenal").
+Syarat: Android 10 ke atas. Internet dibutuhkan saat pertama kali
+(unduh model suara ~40 MB dan model terjemahan ~30 MB).
 
-## Build lewat Android Studio
-Buka folder ini -> tunggu sync -> Build > Build APK(s).
+Catatan: aplikasi yang memblokir perekaman suara internal (mis. Netflix,
+Disney+) tidak bisa ditangkap. YouTube dan pemutar video biasa umumnya bisa.
 
-## Pemakaian
-1. Buka app, ketuk tombol 1 dan izinkan overlay.
-2. Ketuk tombol 2, izinkan mikrofon, lalu putar video bahasa Inggris.
-3. Kotak terjemahan melayang di layar; geser untuk memindahkan, ketuk "tutup" untuk berhenti.
-Pertama kali butuh internet untuk mengunduh model terjemahan (~30 MB); setelah itu terjemahan offline.
+Build: unggah isi folder ke GitHub, tab Actions akan membuat app-debug.apk.

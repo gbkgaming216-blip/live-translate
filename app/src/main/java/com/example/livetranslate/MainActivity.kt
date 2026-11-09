@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -27,8 +28,8 @@ class MainActivity : Activity() {
             setPadding(pad, pad * 2, pad, pad)
         }
         TextView(this).apply {
-            text = "Live Translate\nEnglish → Indonesia"
-            textSize = 24f
+            text = "Live Translate\nSuara video (English) → teks Indonesia"
+            textSize = 22f
             gravity = Gravity.CENTER
         }.also { root.addView(it) }
 
@@ -60,7 +61,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         status.text = "Overlay: " + (if (Settings.canDrawOverlays(this)) "diizinkan ✓" else "belum diizinkan") +
-            "\nMikrofon: " + (if (hasMic()) "diizinkan ✓" else "belum diizinkan")
+            "\nIzin audio: " + (if (hasMic()) "diizinkan ✓" else "belum diizinkan")
     }
 
     private fun hasMic() =
@@ -75,14 +76,30 @@ class MainActivity : Activity() {
             requestPermissions(perms.toTypedArray(), 1)
             return
         }
-        startForegroundService(Intent(this, OverlayService::class.java))
-        toast("Berjalan. Buka video lalu putar.")
-        moveTaskToBack(true)
+        // Dialog sistem ini wajib agar aplikasi boleh menangkap suara internal HP.
+        // Aplikasi ini TIDAK merekam layar.
+        val mpm = getSystemService(MediaProjectionManager::class.java)
+        startActivityForResult(mpm.createScreenCaptureIntent(), 100)
     }
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, perms, results)
-        if (hasMic()) start() else toast("Izin mikrofon dibutuhkan")
+        if (hasMic()) start() else toast("Izin audio dibutuhkan")
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 100) {
+            if (resultCode == RESULT_OK && data != null) {
+                val i = Intent(this, OverlayService::class.java)
+                    .putExtra("code", resultCode)
+                    .putExtra("data", data)
+                startForegroundService(i)
+                toast("Berjalan. Buka video lalu putar.")
+                moveTaskToBack(true)
+            } else toast("Izin penangkapan suara ditolak")
+        }
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
