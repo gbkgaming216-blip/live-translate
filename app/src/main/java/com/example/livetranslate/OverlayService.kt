@@ -41,6 +41,7 @@ class OverlayService : Service() {
 
     private lateinit var wm: WindowManager
     private var box: LinearLayout? = null
+    private lateinit var tvPrev: TextView
     private lateinit var tvId: TextView
     private lateinit var tvEn: TextView
     private lateinit var params: WindowManager.LayoutParams
@@ -54,6 +55,9 @@ class OverlayService : Service() {
     @Volatile private var translatorReady = false
     private var lastEn = ""
     private var lastTranslateAt = 0L
+    private var lastFinalId = ""
+
+    private val modelName = "vosk-model-en-us-0.22-lgraph"
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -71,7 +75,6 @@ class OverlayService : Service() {
         val data: Intent? = if (Build.VERSION.SDK_INT >= 33)
             intent.getParcelableExtra("data", Intent::class.java)
         else @Suppress("DEPRECATION") intent.getParcelableExtra("data")
-
         if (data == null) { ui("Izin penangkapan suara tidak valid."); return START_NOT_STICKY }
 
         val mpm = getSystemService(MediaProjectionManager::class.java)
@@ -92,7 +95,7 @@ class OverlayService : Service() {
         )
         val n = Notification.Builder(this, "lt")
             .setContentTitle("Live Translate aktif")
-            .setContentText("Menerjemahkan suara HP ke Indonesia")
+            .setContentText("Menerjemahkan suara HP ke Indonesia (offline)")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .build()
         startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
@@ -128,13 +131,14 @@ class OverlayService : Service() {
             gravity = Gravity.END
             setOnClickListener { stopSelf() }
         }
+        tvPrev = TextView(this).apply { setTextColor(Color.GRAY); textSize = 14f }
         tvId = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = 19f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             text = "Memulai…"
         }
         tvEn = TextView(this).apply { setTextColor(Color.LTGRAY); textSize = 12f }
-        b.addView(close); b.addView(tvId); b.addView(tvEn)
+        b.addView(close); b.addView(tvPrev); b.addView(tvId); b.addView(tvEn)
 
         params = WindowManager.LayoutParams(
             (resources.displayMetrics.widthPixels * 0.92).toInt(),
@@ -146,7 +150,7 @@ class OverlayService : Service() {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = (resources.displayMetrics.widthPixels * 0.04).toInt()
-            y = (resources.displayMetrics.heightPixels * 0.65).toInt()
+            y = (resources.displayMetrics.heightPixels * 0.62).toInt()
         }
 
         var sx = 0; var sy = 0; var tx = 0f; var ty = 0f
@@ -169,32 +173,58 @@ class OverlayService : Service() {
 
     private fun show(en: String, final: Boolean) {
         val now = System.currentTimeMillis()
-        if (!final && (now - lastTranslateAt < 600 || en == lastEn)) return
+        if (!final && (now - lastTranslateAt < 800 || en == lastEn)) return
         lastTranslateAt = now
         lastEn = en
         handler.post {
             if (box == null) return@post
             tvEn.text = en
             if (translatorReady) {
-                translator?.translate(en)?.addOnSuccessListener { tvId.text = it }
+                translator?.translate(en)?.addOnSuccessListener { id ->
+                    if (box == null) return@addOnSuccessListener
+                    if (final) {
+                        tvPrev.text = lastFinalId
+                        lastFinalId = id
+                    }
+                    tvId.text = id
+                }
             }
         }
     }
 
-    // ---------- Model suara offline (Vosk, English) ----------
+    // ---------- Model suara offline yang lebih besar (Vosk lgraph, English) ----------
 
     private fun ensureModel(): File {
         val root = File(filesDir, "vosk")
-        val dir = File(root, "vosk-model-small-en-us-0.15")
+        val dir = File(root, modelName)
         if (File(dir, "am/final.mdl").exists()) return dir
 
-        ui("Mengunduh model suara (~40 MB), hanya sekali…")
         root.mkdirs()
         val zip = File(cacheDir, "model.zip")
-        val conn = URL("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip").openConnection()
+        val conn = URL("https://alphacephei.com/vosk/models/$modelName.zip").openConnection()
         conn.connectTimeout = 15000
         conn.readTimeout = 30000
-        conn.getInputStream().use { input -> zip.outputStream().use { input.copyTo(it) } }
+        val total = conn.contentLengthLong
+        var done = 0L
+        var lastPct = -1
+        conn.getInputStream().use { input ->
+            zip.outputStream().use { o ->
+                val b = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(b)
+                    if (n < 0) break
+                    o.write(b, 0, n)
+                    done += n
+                    if (total > 0) {
+                        val pct = (done * 100 / total).toInt()
+                        if (pct != lastPct && pct % 5 == 0) {
+                            lastPct = pct
+                            ui("Mengunduh model suara (sekali saja)… $pct%")
+                        }
+                    }
+                }
+            }
+        }
 
         ui("Mengekstrak model…")
         ZipInputStream(zip.inputStream()).use { zis ->
@@ -213,7 +243,7 @@ class OverlayService : Service() {
         return dir
     }
 
-    // ---------- Tangkap suara internal -> kenali -> terjemahkan ----------
+    // ---------- Tangkap suara internal -> saring -> kenali -> terjemahkan ----------
 
     @SuppressLint("MissingPermission")
     private fun runPipeline() {
@@ -243,29 +273,33 @@ class OverlayService : Service() {
                 .build()
             audioRecord = rec
             rec.startRecording()
-            ui("Siap. Putar videonya…")
+            ui("Siap. Putar lagu/videonya…")
 
             val buf = ShortArray(4800)          // 100 ms @ 48 kHz
             val out = ByteArray(1600 * 2)       // 100 ms @ 16 kHz
             var everHeard = false
             var reads = 0
+            var hpIn = 0f
+            var hpOut = 0f
 
             while (running) {
                 val n = rec.read(buf, 0, buf.size)
                 if (n <= 0) { Thread.sleep(20); continue }
 
-                var peak = 0
                 val m = n / 3
                 for (i in 0 until m) {
-                    val s = (buf[i * 3] + buf[i * 3 + 1] + buf[i * 3 + 2]) / 3
-                    if (kotlin.math.abs(s) > peak) peak = kotlin.math.abs(s)
+                    val x = ((buf[i * 3] + buf[i * 3 + 1] + buf[i * 3 + 2]) / 3).toFloat()
+                    if (x != 0f) everHeard = true
+                    // Filter high-pass ±200 Hz: kurangi dentuman bass/drum agar vokal lebih jelas
+                    val y = 0.93f * (hpOut + x - hpIn)
+                    hpIn = x; hpOut = y
+                    val s = y.coerceIn(-32768f, 32767f).toInt()
                     out[2 * i] = (s and 0xff).toByte()
                     out[2 * i + 1] = ((s shr 8) and 0xff).toByte()
                 }
-                if (peak > 0) everHeard = true
                 reads++
                 if (!everHeard && reads == 200) {
-                    ui("Belum ada suara tertangkap. Pastikan video berbunyi, atau aplikasi videonya memblokir perekaman suara (mis. Netflix).")
+                    ui("Belum ada suara tertangkap. Pastikan media berbunyi, atau aplikasinya memblokir perekaman suara (mis. Netflix).")
                 }
 
                 if (recognizer.acceptWaveForm(out, m * 2)) {

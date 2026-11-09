@@ -28,7 +28,7 @@ class MainActivity : Activity() {
             setPadding(pad, pad * 2, pad, pad)
         }
         TextView(this).apply {
-            text = "Live Translate\nSuara video (English) → teks Indonesia"
+            text = "Live Translate v4 (offline)\nSuara HP (English) → teks Indonesia"
             textSize = 22f
             gravity = Gravity.CENTER
         }.also { root.addView(it) }
@@ -96,7 +96,7 @@ class MainActivity : Activity() {
                     .putExtra("code", resultCode)
                     .putExtra("data", data)
                 startForegroundService(i)
-                toast("Berjalan. Buka video lalu putar.")
+                toast("Berjalan. Buka lagu/video lalu putar.")
                 moveTaskToBack(true)
             } else toast("Izin penangkapan suara ditolak")
         }
